@@ -1102,6 +1102,8 @@ func (m model) renderGantt(projectName string, availH int) string {
 		return ""
 	}
 
+	styleToday := lipgloss.NewStyle().Foreground(colPurple)
+
 	// Collect pending + completed/deleted tasks for this project
 	var tasks []Task
 	for _, t := range append(m.tasks, m.completedTasks...) {
@@ -1134,14 +1136,13 @@ func (m model) renderGantt(projectName string, availH int) string {
 	title := styleColHeader.Render("Gantt  ") + styleMuted.Render(projectName)
 	divider := styleMuted.Render(strings.Repeat("─", m.width))
 
-	// Single axis row: weekly labels + ▼ today marker
+	// Axis: month labels + ▼ today marker (same purple as vertical line)
 	type axisSeg struct {
 		col   int
 		text  string
 		style lipgloss.Style
 	}
 	var segs []axisSeg
-	// Month boundaries
 	cur := winStart
 	if cur.Day() != 1 {
 		cur = time.Date(cur.Year(), cur.Month()+1, 1, 0, 0, 0, 0, cur.Location())
@@ -1153,14 +1154,13 @@ func (m model) renderGantt(projectName string, availH int) string {
 		}
 		cur = time.Date(cur.Year(), cur.Month()+1, 1, 0, 0, 0, 0, cur.Location())
 	}
-	// Today marker
-	segs = append(segs, axisSeg{todayCol, "▼", styleActive})
+	segs = append(segs, axisSeg{todayCol, "▼", styleToday})
 	sort.Slice(segs, func(i, j int) bool { return segs[i].col < segs[j].col })
 	axisStr := strings.Repeat(" ", leftW)
 	pos := 0
 	for _, seg := range segs {
 		if seg.col < pos {
-			continue // overlapping label — skip
+			continue
 		}
 		if seg.col > pos {
 			axisStr += strings.Repeat(" ", seg.col-pos)
@@ -1172,6 +1172,15 @@ func (m model) renderGantt(projectName string, availH int) string {
 	lines := []string{title, divider, axisStr}
 	taskRows := availH - 3
 	overflow := 0
+
+	// Cell types for timeline rendering
+	const (
+		ctEmpty    = iota
+		ctBar      // normal bar segment
+		ctTodayBar // bar crossing today column
+		ctToday    // today column in empty space
+		ctPoint    // ◆ point marker
+	)
 
 	for i, t := range tasks {
 		if i >= taskRows {
@@ -1227,21 +1236,22 @@ func (m model) renderGantt(projectName string, availH int) string {
 		}
 
 		// Bar char and style
-		var barChar string
+		var barRune rune
 		var barStyle lipgloss.Style
+		isPoint := false
 		switch {
 		case t.Status == "completed":
-			barChar = "─"
+			barRune = '━'
 			barStyle = styleDueOk
 		case t.Status == "deleted":
-			barChar = "─"
+			barRune = '╌'
 			barStyle = styleMuted
 		case t.IsActive():
-			barChar = "█"
+			barRune = '▓'
 			barStyle = styleActive
 		case t.Due != "":
 			dueTime, _ := parseTaskDate(t.Due)
-			barChar = "─"
+			barRune = '─'
 			if dueTime.Before(today) {
 				barStyle = styleOverdue
 			} else if dueTime.Before(today.Add(3 * 24 * time.Hour)) {
@@ -1250,15 +1260,59 @@ func (m model) renderGantt(projectName string, availH int) string {
 				barStyle = styleDueOk
 			}
 		default:
-			barChar = "◆"
+			barRune = '◆'
 			barStyle = styleMuted
+			isPoint = true
 		}
 
-		length := max(1, endCol-startCol+1)
-		barStr := barStyle.Render(strings.Repeat(barChar, length))
+		// Build cell-type array for this row's timeline
+		cells := make([]int, timelineW)
+		for col := 0; col < timelineW; col++ {
+			inBar := !isPoint && col >= startCol && col <= endCol
+			atPoint := isPoint && col == startCol
+			isToday := todayCol >= 0 && col == todayCol
+			switch {
+			case isToday && inBar:
+				cells[col] = ctTodayBar
+			case isToday:
+				cells[col] = ctToday
+			case atPoint:
+				cells[col] = ctPoint
+			case inBar:
+				cells[col] = ctBar
+			}
+		}
+
+		// Render timeline in batched runs
+		var tl strings.Builder
+		col := 0
+		for col < timelineW {
+			ct := cells[col]
+			// Find end of this run (single-char types don't batch)
+			end := col + 1
+			if ct == ctEmpty || ct == ctBar {
+				for end < timelineW && cells[end] == ct {
+					end++
+				}
+			}
+			count := end - col
+			switch ct {
+			case ctEmpty:
+				tl.WriteString(strings.Repeat(" ", count))
+			case ctBar:
+				tl.WriteString(barStyle.Render(strings.Repeat(string(barRune), count)))
+			case ctTodayBar:
+				tl.WriteString(styleToday.Render(string(barRune)))
+			case ctToday:
+				tl.WriteString(styleToday.Render("│"))
+			case ctPoint:
+				tl.WriteString(barStyle.Render("◆"))
+			}
+			col = end
+		}
+
 		nameStr := styleFg.Width(nameColW).Render(truncate(t.Description, nameColW-1))
-		row := statusIcon + nameStr + strings.Repeat(" ", startCol) + barStr
-		lines = append(lines, row)
+		lines = append(lines, statusIcon+nameStr+tl.String())
 	}
 
 	if overflow > 0 {
