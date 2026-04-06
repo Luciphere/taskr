@@ -1102,9 +1102,9 @@ func (m model) renderGantt(projectName string, availH int) string {
 		return ""
 	}
 
-	// Collect tasks for this project
+	// Collect pending + completed/deleted tasks for this project
 	var tasks []Task
-	for _, t := range m.tasks {
+	for _, t := range append(m.tasks, m.completedTasks...) {
 		name := t.Project
 		if name == "" {
 			name = "(no project)"
@@ -1121,49 +1121,54 @@ func (m model) renderGantt(projectName string, availH int) string {
 
 	// Time window
 	today := time.Now().Truncate(24 * time.Hour)
-	nameColW := 22
-	timelineW := max(10, m.width-nameColW-2)
+	statusColW := 2
+	nameColW := 20
+	leftW := statusColW + nameColW
+	timelineW := max(10, m.width-leftW-2)
 	lookback := timelineW / 4
 	winStart := today.AddDate(0, 0, -lookback)
 	winEnd := today.AddDate(0, 0, timelineW-lookback-1)
 	todayCol := lookback
-	_ = winEnd
 
 	// Section header
 	title := styleColHeader.Render("Gantt  ") + styleMuted.Render(projectName)
 	divider := styleMuted.Render(strings.Repeat("─", m.width))
 
-	// Axis row 1: today marker (▼)
-	axisTopStr := strings.Repeat(" ", nameColW)
-	for i := 0; i < timelineW; i++ {
-		if i == todayCol {
-			axisTopStr += styleActive.Render("▼")
-		} else {
-			axisTopStr += " "
-		}
+	// Single axis row: weekly labels + ▼ today marker
+	type axisSeg struct {
+		col   int
+		text  string
+		style lipgloss.Style
 	}
-
-	// Axis row 2: weekly "Jan 02" labels
-	axisRune := make([]rune, timelineW)
-	for i := range axisRune {
-		axisRune[i] = ' '
-	}
+	var segs []axisSeg
 	cur := winStart
 	for cur.Weekday() != time.Monday {
 		cur = cur.AddDate(0, 0, 1)
 	}
-	for !cur.After(today.AddDate(0, 0, timelineW-lookback-1)) {
+	for !cur.After(winEnd) {
 		col := int(cur.Sub(winStart).Hours() / 24)
-		label := []rune(cur.Format("Jan 02"))
 		if col >= 0 && col+6 <= timelineW {
-			copy(axisRune[col:], label)
+			segs = append(segs, axisSeg{col, cur.Format("Jan 02"), styleMuted})
 		}
 		cur = cur.AddDate(0, 0, 7)
 	}
-	axisBottomStr := strings.Repeat(" ", nameColW) + string(axisRune)
+	segs = append(segs, axisSeg{todayCol, "▼", styleActive})
+	sort.Slice(segs, func(i, j int) bool { return segs[i].col < segs[j].col })
+	axisStr := strings.Repeat(" ", leftW)
+	pos := 0
+	for _, seg := range segs {
+		if seg.col < pos {
+			continue // overlapping label — skip
+		}
+		if seg.col > pos {
+			axisStr += strings.Repeat(" ", seg.col-pos)
+		}
+		axisStr += seg.style.Render(seg.text)
+		pos = seg.col + len([]rune(seg.text))
+	}
 
-	lines := []string{title, divider, axisTopStr, axisBottomStr}
-	taskRows := availH - 4
+	lines := []string{title, divider, axisStr}
+	taskRows := availH - 3
 	overflow := 0
 
 	for i, t := range tasks {
@@ -1181,13 +1186,21 @@ func (m model) renderGantt(projectName string, availH int) string {
 			barStart = entryDate
 		}
 
-		hasDue := t.Due != ""
-		if hasDue {
-			barEnd, _ = parseTaskDate(t.Due)
-		} else if t.IsActive() {
-			barEnd = today
-		} else {
-			barEnd = barStart
+		switch t.Status {
+		case "completed", "deleted":
+			if t.End != "" {
+				barEnd, _ = parseTaskDate(t.End)
+			} else {
+				barEnd = barStart
+			}
+		default:
+			if t.Due != "" {
+				barEnd, _ = parseTaskDate(t.Due)
+			} else if t.IsActive() {
+				barEnd = today
+			} else {
+				barEnd = barStart
+			}
 		}
 
 		startCol := int(barStart.Sub(winStart).Hours() / 24)
@@ -1198,12 +1211,33 @@ func (m model) renderGantt(projectName string, availH int) string {
 			startCol = endCol
 		}
 
+		// Status icon
+		var statusIcon string
+		switch {
+		case t.Status == "completed":
+			statusIcon = styleDueOk.Render("✓ ")
+		case t.Status == "deleted":
+			statusIcon = styleOverdue.Render("✗ ")
+		case t.IsActive():
+			statusIcon = styleActive.Render("▶ ")
+		default:
+			statusIcon = styleMuted.Render("· ")
+		}
+
+		// Bar char and style
 		var barChar string
 		var barStyle lipgloss.Style
-		if t.IsActive() {
+		switch {
+		case t.Status == "completed":
+			barChar = "─"
+			barStyle = styleDueOk
+		case t.Status == "deleted":
+			barChar = "─"
+			barStyle = styleMuted
+		case t.IsActive():
 			barChar = "█"
 			barStyle = styleActive
-		} else if hasDue {
+		case t.Due != "":
 			dueTime, _ := parseTaskDate(t.Due)
 			barChar = "─"
 			if dueTime.Before(today) {
@@ -1213,15 +1247,15 @@ func (m model) renderGantt(projectName string, availH int) string {
 			} else {
 				barStyle = styleDueOk
 			}
-		} else {
+		default:
 			barChar = "◆"
 			barStyle = styleMuted
 		}
 
 		length := max(1, endCol-startCol+1)
 		barStr := barStyle.Render(strings.Repeat(barChar, length))
-		row := styleFg.Width(nameColW).Render(truncate(t.Description, nameColW-1)) +
-			strings.Repeat(" ", startCol) + barStr
+		nameStr := styleFg.Width(nameColW).Render(truncate(t.Description, nameColW-1))
+		row := statusIcon + nameStr + strings.Repeat(" ", startCol) + barStr
 		lines = append(lines, row)
 	}
 
