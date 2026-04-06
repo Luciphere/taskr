@@ -1123,7 +1123,7 @@ func (m model) renderGantt(projectName string, availH int) string {
 
 	// Time window
 	today := time.Now().Truncate(24 * time.Hour)
-	statusColW := 2
+	statusColW := 11
 	nameColW := 20
 	leftW := statusColW + nameColW
 	timelineW := max(10, m.width-leftW-2)
@@ -1224,15 +1224,16 @@ func (m model) renderGantt(projectName string, availH int) string {
 
 		// Status icon
 		var statusIcon string
+		statusStyle := lipgloss.NewStyle().Width(statusColW).Bold(true)
 		switch {
 		case t.Status == "completed":
-			statusIcon = styleDueOk.Render("✓ ")
+			statusIcon = statusStyle.Foreground(colGreen).Render("Completed")
 		case t.Status == "deleted":
-			statusIcon = styleOverdue.Render("✗ ")
+			statusIcon = statusStyle.Foreground(colRed).Render("Deleted")
 		case t.IsActive():
-			statusIcon = styleActive.Render("▶ ")
+			statusIcon = statusStyle.Foreground(colCyan).Render("Active")
 		default:
-			statusIcon = styleMuted.Render("· ")
+			statusIcon = statusStyle.Foreground(colPurple).Render("Pending")
 		}
 
 		// Bar char and style
