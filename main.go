@@ -1104,7 +1104,7 @@ func (m model) renderGantt(projectName string, availH int) string {
 
 	styleToday := lipgloss.NewStyle().Foreground(colPurple)
 
-	// Collect pending + completed/deleted tasks for this project
+	// Collect pending + completed tasks for this project (no deleted)
 	var tasks []Task
 	for _, t := range append(m.tasks, m.completedTasks...) {
 		if t.Status == "deleted" {
@@ -1118,10 +1118,20 @@ func (m model) renderGantt(projectName string, availH int) string {
 			tasks = append(tasks, t)
 		}
 	}
+
+	// Waterfall sort: earliest bar start at top
 	sort.Slice(tasks, func(i, j int) bool {
-		ei, _ := parseTaskDate(tasks[i].Entry)
-		ej, _ := parseTaskDate(tasks[j].Entry)
-		return ei.Before(ej)
+		si := tasks[i].Scheduled
+		if si == "" {
+			si = tasks[i].Entry
+		}
+		sj := tasks[j].Scheduled
+		if sj == "" {
+			sj = tasks[j].Entry
+		}
+		ti, _ := parseTaskDate(si)
+		tj, _ := parseTaskDate(sj)
+		return ti.Before(tj)
 	})
 
 	// Time window
@@ -1139,7 +1149,38 @@ func (m model) renderGantt(projectName string, availH int) string {
 	title := styleColHeader.Render("Gantt  ") + styleMuted.Render(projectName)
 	divider := styleMuted.Render(strings.Repeat("─", m.width))
 
-	// Axis: month labels + ▼ today marker (same purple as vertical line)
+	// Project health summary
+	var completedCount, overdueCount int
+	var nextDue time.Time
+	for _, t := range tasks {
+		if t.Status == "completed" {
+			completedCount++
+		} else if t.Status == "pending" {
+			if due, ok := parseTaskDate(t.Due); ok {
+				if due.Before(today) {
+					overdueCount++
+				}
+				if nextDue.IsZero() || due.Before(nextDue) {
+					nextDue = due
+				}
+			}
+		}
+	}
+	pendingCount := len(tasks) - completedCount
+	sep := styleMuted.Render("  ·  ")
+	healthParts := []string{
+		styleFg.Render(fmt.Sprintf("%d pending", pendingCount)),
+		styleDueOk.Render(fmt.Sprintf("%d completed", completedCount)),
+	}
+	if overdueCount > 0 {
+		healthParts = append(healthParts, styleOverdue.Render(fmt.Sprintf("%d overdue", overdueCount)))
+	}
+	if !nextDue.IsZero() {
+		healthParts = append(healthParts, styleMuted.Render("next due: "+nextDue.Format("Jan 02")))
+	}
+	healthLine := "  " + strings.Join(healthParts, sep)
+
+	// Axis: month labels + ▼ today marker
 	type axisSeg struct {
 		col   int
 		text  string
@@ -1174,18 +1215,32 @@ func (m model) renderGantt(projectName string, availH int) string {
 
 	colHeaders := styleColHeader.Width(statusColW).Render("Status") +
 		styleColHeader.Width(nameColW).Render("Task")
-	lines := []string{title, divider, colHeaders, axisStr}
-	taskRows := availH - 4
+	lines := []string{title, divider, healthLine, colHeaders, axisStr}
+	taskRows := availH - 5
 	overflow := 0
 
 	// Cell types for timeline rendering
 	const (
-		ctEmpty    = iota
-		ctBar      // normal bar segment
-		ctTodayBar // bar crossing today column
-		ctToday    // today column in empty space
-		ctPoint    // ◆ point marker
+		ctEmpty         = iota
+		ctBar           // normal bar segment
+		ctTodayBar      // bar crossing today column
+		ctToday         // today column in empty space
+		ctPoint         // ◆ point marker
+		ctBlockedMarker // ◀ task is blocked by unfinished dependency
+		ctBlockerMarker // ▶ other tasks depend on this one
 	)
+
+	// Pre-calculate dependency sets
+	pendingUUIDs := map[string]bool{}
+	for _, t := range m.tasks {
+		pendingUUIDs[t.UUID] = true
+	}
+	blockerUUIDs := map[string]bool{}
+	for _, t := range tasks {
+		for _, dep := range t.Depends {
+			blockerUUIDs[dep] = true
+		}
+	}
 
 	for i, t := range tasks {
 		if i >= taskRows {
@@ -1203,7 +1258,7 @@ func (m model) renderGantt(projectName string, availH int) string {
 		}
 
 		switch t.Status {
-		case "completed", "deleted":
+		case "completed":
 			if t.End != "" {
 				barEnd, _ = parseTaskDate(t.End)
 			} else {
@@ -1227,14 +1282,22 @@ func (m model) renderGantt(projectName string, availH int) string {
 			startCol = endCol
 		}
 
-		// Status icon
+		// Dependency flags
+		isBlocked := false
+		for _, dep := range t.Depends {
+			if pendingUUIDs[dep] {
+				isBlocked = true
+				break
+			}
+		}
+		isBlocker := blockerUUIDs[t.UUID]
+
+		// Status label
 		var statusIcon string
 		statusStyle := lipgloss.NewStyle().Width(statusColW).Bold(true)
 		switch {
 		case t.Status == "completed":
 			statusIcon = statusStyle.Foreground(colGreen).Render("Completed")
-		case t.Status == "deleted":
-			statusIcon = statusStyle.Foreground(colRed).Render("Deleted")
 		case t.IsActive():
 			statusIcon = statusStyle.Foreground(colCyan).Render("Active")
 		default:
@@ -1249,9 +1312,6 @@ func (m model) renderGantt(projectName string, availH int) string {
 		case t.Status == "completed":
 			barRune = '━'
 			barStyle = styleDueOk
-		case t.Status == "deleted":
-			barRune = '╌'
-			barStyle = styleMuted
 		case t.IsActive():
 			barRune = '▓'
 			barStyle = styleActive
@@ -1271,7 +1331,7 @@ func (m model) renderGantt(projectName string, availH int) string {
 			isPoint = true
 		}
 
-		// Build cell-type array for this row's timeline
+		// Build cell-type array
 		cells := make([]int, timelineW)
 		for col := 0; col < timelineW; col++ {
 			inBar := !isPoint && col >= startCol && col <= endCol
@@ -1288,13 +1348,22 @@ func (m model) renderGantt(projectName string, availH int) string {
 				cells[col] = ctBar
 			}
 		}
+		if isBlocked {
+			markerCol := startCol - 1
+			if markerCol < 0 {
+				markerCol = 0
+			}
+			cells[markerCol] = ctBlockedMarker
+		}
+		if isBlocker && endCol+1 < timelineW {
+			cells[endCol+1] = ctBlockerMarker
+		}
 
 		// Render timeline in batched runs
 		var tl strings.Builder
 		col := 0
 		for col < timelineW {
 			ct := cells[col]
-			// Find end of this run (single-char types don't batch)
 			end := col + 1
 			if ct == ctEmpty || ct == ctBar {
 				for end < timelineW && cells[end] == ct {
@@ -1313,11 +1382,33 @@ func (m model) renderGantt(projectName string, availH int) string {
 				tl.WriteString(styleToday.Render("│"))
 			case ctPoint:
 				tl.WriteString(barStyle.Render("◆"))
+			case ctBlockedMarker:
+				tl.WriteString(styleOverdue.Render("◀"))
+			case ctBlockerMarker:
+				tl.WriteString(styleMuted.Render("▶"))
 			}
 			col = end
 		}
 
-		nameStr := styleFg.Width(nameColW).Render(truncate(t.Description, nameColW-1))
+		// Priority dot + task name + recurrence badge
+		var priPrefix string
+		switch t.Priority {
+		case "H":
+			priPrefix = stylePriH.Render("● ")
+		case "M":
+			priPrefix = stylePriM.Render("● ")
+		case "L":
+			priPrefix = stylePriL.Render("● ")
+		default:
+			priPrefix = styleMuted.Render("· ")
+		}
+		recurSuffix := "  "
+		if t.Recur != "" {
+			recurSuffix = styleMuted.Render(" ↺")
+		}
+		descStr := styleFg.Render(fmt.Sprintf("%-16s", truncate(t.Description, 16)))
+		nameStr := priPrefix + descStr + recurSuffix
+
 		lines = append(lines, statusIcon+nameStr+tl.String())
 	}
 
