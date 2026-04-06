@@ -882,6 +882,9 @@ func (m model) renderTable(availH int) string {
 	for i := start; i < end; i++ {
 		rows = append(rows, m.renderRow(tasks[i], i == m.cursor, idW, priW, actW, descW, projW, tagW, dueW))
 	}
+	for len(rows) < availH {
+		rows = append(rows, "")
+	}
 	return strings.Join(rows, "\n")
 }
 
@@ -1503,6 +1506,9 @@ func (m model) renderHistory() string {
 		} else {
 			rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 		}
+	}
+	for len(rows) < availH {
+		rows = append(rows, "")
 	}
 	return strings.Join(rows, "\n")
 }
