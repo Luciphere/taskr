@@ -5,8 +5,7 @@ A terminal UI for [Taskwarrior](https://taskwarrior.org/), built with [Bubbletea
 ## Install
 
 ```bash
-sudo curl -L https://github.com/Luciphere/taskr/releases/latest/download/taskr \
-  -o /usr/local/bin/taskr && sudo chmod +x /usr/local/bin/taskr
+sudo curl -L https://github.com/Luciphere/taskr/releases/latest/download/taskr -o /usr/local/bin/taskr && sudo chmod +x /usr/local/bin/taskr
 ```
 
 Requires Taskwarrior (`task`) to be installed.
