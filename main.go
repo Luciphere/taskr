@@ -735,12 +735,12 @@ func (m model) View() string {
 }
 
 func (m model) renderMain() string {
-	// header=3, searchBar=1 (when active), detailPane=detailPaneH, footer=1
+	// header=3, searchBar=1 (when active), detailPane=detailPaneH, footer=2
 	searchBarH := 0
 	if m.searching {
 		searchBarH = 1
 	}
-	tableAvailH := m.height - 3 - searchBarH - detailPaneH - 1
+	tableAvailH := m.height - 3 - searchBarH - detailPaneH - 2
 	parts := []string{m.renderHeader()}
 	if m.searching {
 		parts = append(parts, m.renderSearchBar())
@@ -750,11 +750,15 @@ func (m model) renderMain() string {
 }
 
 func (m model) renderProjectsView() string {
-	bodyH := m.height - 4 // header(3) + footer(1)
-	tableMaxH := (bodyH * 2) / 5
-	ganttH := bodyH - tableMaxH
+	bodyH := m.height - 5 // header(3) + footer(2)
 
 	projects := m.projectSummaries()
+	// Size table to content, capped at 40% of body
+	tableMaxH := min(len(projects)+2, (bodyH*2)/5)
+	if tableMaxH < 3 {
+		tableMaxH = 3
+	}
+	ganttH := bodyH - tableMaxH
 	projectName := ""
 	if m.projectCursor < len(projects) {
 		projectName = projects[m.projectCursor].name
@@ -1610,10 +1614,12 @@ func (m model) renderFooter() string {
 		parts = append(parts, styleHelpKey.Render(b[0])+styleHelpDesc.Render(" "+b[1]))
 	}
 	return lipgloss.NewStyle().
+		BorderTop(true).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(colMuted).
 		Width(m.width).
 		Padding(0, 1).
-		Foreground(colMuted).
-		Render(strings.Join(parts, "  ·  "))
+		Render(strings.Join(parts, styleMuted.Render("  ·  ")))
 }
 
 // ── Confirm overlay ───────────────────────────────────────────────────────────
