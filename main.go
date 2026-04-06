@@ -157,29 +157,28 @@ type model struct {
 
 // ── Messages ──────────────────────────────────────────────────────────────────
 
-type tasksLoadedMsg []Task
-type completedLoadedMsg []Task
+type allTasksLoadedMsg struct {
+	pending   []Task
+	completed []Task
+}
 type errMsg struct{ err error }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-func fetchTasks() tea.Cmd {
+// fetchAll fetches both pending and completed tasks in one shot,
+// producing a single message so the UI only redraws once.
+func fetchAll() tea.Cmd {
 	return func() tea.Msg {
+		var pending []Task
 		out, err := exec.Command("task", "rc.confirmation=no", "status:pending", "export").Output()
 		if err != nil {
 			return errMsg{err}
 		}
-		var tasks []Task
-		if err := json.Unmarshal(out, &tasks); err != nil {
+		if err := json.Unmarshal(out, &pending); err != nil {
 			return errMsg{err}
 		}
-		return tasksLoadedMsg(tasks)
-	}
-}
 
-func fetchCompleted() tea.Cmd {
-	return func() tea.Msg {
-		var all []Task
+		var completed []Task
 		for _, status := range []string{"completed", "deleted"} {
 			out, err := exec.Command("task", "rc.confirmation=no", "status:"+status, "export").Output()
 			if err != nil {
@@ -189,13 +188,12 @@ func fetchCompleted() tea.Cmd {
 			if err := json.Unmarshal(out, &tasks); err != nil {
 				continue
 			}
-			all = append(all, tasks...)
+			completed = append(completed, tasks...)
 		}
-		// Sort by end date descending (most recent first)
-		sort.Slice(all, func(i, j int) bool {
-			return all[i].End > all[j].End
+		sort.Slice(completed, func(i, j int) bool {
+			return completed[i].End > completed[j].End
 		})
-		return completedLoadedMsg(all)
+		return allTasksLoadedMsg{pending: pending, completed: completed}
 	}
 }
 
@@ -205,13 +203,8 @@ func runTask(args ...string) tea.Cmd {
 		if err := cmd.Run(); err != nil {
 			return errMsg{err}
 		}
-		return fetchTasks()()
+		return fetchAll()()
 	}
-}
-
-// runTaskRefreshAll runs a task command then refreshes both pending and completed lists.
-func runTaskRefreshAll(args ...string) tea.Cmd {
-	return tea.Sequence(runTask(args...), fetchCompleted())
 }
 
 // purgeHistoryTask permanently removes a task. Completed tasks are deleted first
@@ -224,7 +217,7 @@ func purgeHistoryTask(t Task) tea.Cmd {
 		if err := exec.Command("task", "rc.confirmation=no", t.UUID, "purge").Run(); err != nil {
 			return errMsg{err}
 		}
-		return fetchCompleted()()
+		return fetchAll()()
 	}
 }
 
@@ -253,7 +246,7 @@ func newModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchTasks(), fetchCompleted())
+	return fetchAll()
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
@@ -263,17 +256,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 
-	case completedLoadedMsg:
-		m.completedTasks = []Task(msg)
-		if m.historyCursor >= len(m.completedTasks) {
-			m.historyCursor = max(0, len(m.completedTasks)-1)
-		}
-
-	case tasksLoadedMsg:
-		m.tasks = []Task(msg)
+	case allTasksLoadedMsg:
+		m.tasks = msg.pending
+		m.completedTasks = msg.completed
 		m.err = nil
 		if m.cursor >= len(m.tasks) {
 			m.cursor = max(0, len(m.tasks)-1)
+		}
+		if m.historyCursor >= len(m.completedTasks) {
+			m.historyCursor = max(0, len(m.completedTasks)-1)
 		}
 		if !m.detailFocused {
 			m = m.syncEditFields()
@@ -399,14 +390,14 @@ func (m model) updateList(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 	case "d":
 		if ft := m.filteredTasks(); len(ft) > 0 {
-			return m, runTaskRefreshAll(fmt.Sprintf("%d", ft[m.cursor].ID), "done")
+			return m, runTask(fmt.Sprintf("%d", ft[m.cursor].ID), "done")
 		}
 	case "x":
 		if ft := m.filteredTasks(); len(ft) > 0 {
 			t := ft[m.cursor]
 			m.confirming = true
 			m.confirmMsg = fmt.Sprintf("Delete \"%s\"? [y/N]", truncate(t.Description, 40))
-			m.confirmAction = runTaskRefreshAll(fmt.Sprintf("%d", t.ID), "delete")
+			m.confirmAction = runTask(fmt.Sprintf("%d", t.ID), "delete")
 			return m, nil
 		}
 	case "s":
@@ -512,7 +503,7 @@ func (m model) updateHistory(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "u":
 		if ft := m.historyFiltered(); len(ft) > 0 {
 			t := ft[m.historyCursor]
-			return m, runTaskRefreshAll(t.UUID, "modify", "status:pending", "end:")
+			return m, runTask(t.UUID, "modify", "status:pending", "end:")
 		}
 	case "x":
 		if ft := m.historyFiltered(); len(ft) > 0 {
@@ -718,7 +709,7 @@ func (m model) buildModifyCmd() tea.Cmd {
 			}
 		}
 
-		return fetchTasks()()
+		return fetchAll()()
 	}
 }
 
@@ -1351,7 +1342,7 @@ func min(a, b int) int {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 func main() {
-	p := tea.NewProgram(newModel(), tea.WithAltScreen())
+	p := tea.NewProgram(newModel(), tea.WithAltScreen(), tea.WithFPS(60))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
