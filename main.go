@@ -1141,17 +1141,19 @@ func (m model) renderGantt(projectName string, availH int) string {
 		style lipgloss.Style
 	}
 	var segs []axisSeg
+	// Month boundaries
 	cur := winStart
-	for cur.Weekday() != time.Monday {
-		cur = cur.AddDate(0, 0, 1)
+	if cur.Day() != 1 {
+		cur = time.Date(cur.Year(), cur.Month()+1, 1, 0, 0, 0, 0, cur.Location())
 	}
 	for !cur.After(winEnd) {
 		col := int(cur.Sub(winStart).Hours() / 24)
-		if col >= 0 && col+6 <= timelineW {
-			segs = append(segs, axisSeg{col, cur.Format("Jan 02"), styleMuted})
+		if col >= 0 && col+3 <= timelineW {
+			segs = append(segs, axisSeg{col, cur.Format("Jan"), styleMuted})
 		}
-		cur = cur.AddDate(0, 0, 7)
+		cur = time.Date(cur.Year(), cur.Month()+1, 1, 0, 0, 0, 0, cur.Location())
 	}
+	// Today marker
 	segs = append(segs, axisSeg{todayCol, "▼", styleActive})
 	sort.Slice(segs, func(i, j int) bool { return segs[i].col < segs[j].col })
 	axisStr := strings.Repeat(" ", leftW)
