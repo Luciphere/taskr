@@ -735,12 +735,12 @@ func (m model) View() string {
 }
 
 func (m model) renderMain() string {
-	// header=3, searchBar=1 (when active), detailPane=detailPaneH, footer=2
+	// header=3, searchBar=1 (when active), detailPane=detailPaneH, footer=3
 	searchBarH := 0
 	if m.searching {
 		searchBarH = 1
 	}
-	tableAvailH := m.height - 3 - searchBarH - detailPaneH - 2
+	tableAvailH := m.height - 3 - searchBarH - detailPaneH - 3
 	parts := []string{m.renderHeader()}
 	if m.searching {
 		parts = append(parts, m.renderSearchBar())
@@ -750,7 +750,7 @@ func (m model) renderMain() string {
 }
 
 func (m model) renderProjectsView() string {
-	bodyH := m.height - 5 // header(3) + footer(2)
+	bodyH := m.height - 6 // header(3) + footer(3)
 
 	projects := m.projectSummaries()
 	// Size table to content, capped at 40% of body
@@ -1618,7 +1618,7 @@ func (m model) renderFooter() string {
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(colMuted).
 		Width(m.width).
-		Padding(0, 1).
+		Padding(0, 1, 1, 1).
 		Render(strings.Join(parts, styleMuted.Render("  ·  ")))
 }
 
