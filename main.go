@@ -750,7 +750,7 @@ func (m model) renderMain() string {
 }
 
 func (m model) renderProjectsView() string {
-	bodyH := m.height - 5 // header(3) + footer(2)
+	bodyH := m.height - 4 // header(3) + footer(1)
 	tableMaxH := (bodyH * 2) / 5
 	ganttH := bodyH - tableMaxH
 
@@ -1215,8 +1215,8 @@ func (m model) renderGantt(projectName string, availH int) string {
 
 	colHeaders := styleColHeader.Width(statusColW).Render("Status") +
 		styleColHeader.Width(nameColW).Render("Task")
-	lines := []string{title, divider, healthLine, colHeaders, axisStr}
-	taskRows := availH - 5
+	lines := []string{title, divider, colHeaders, axisStr}
+	taskRows := availH - 5 // 4 header rows + 1 health line at bottom
 	overflow := 0
 
 	// Cell types for timeline rendering
@@ -1415,9 +1415,11 @@ func (m model) renderGantt(projectName string, availH int) string {
 	if overflow > 0 {
 		lines = append(lines, styleMuted.Render(fmt.Sprintf("  … %d more tasks", overflow)))
 	}
-	for len(lines) < availH {
+	// Pad to leave last row for health summary
+	for len(lines) < availH-1 {
 		lines = append(lines, "")
 	}
+	lines = append(lines, healthLine)
 	return strings.Join(lines, "\n")
 }
 
@@ -1604,12 +1606,10 @@ func (m model) renderFooter() string {
 		parts = append(parts, styleHelpKey.Render(b[0])+styleHelpDesc.Render(" "+b[1]))
 	}
 	return lipgloss.NewStyle().
-		BorderTop(true).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(colMuted).
 		Width(m.width).
 		Padding(0, 1).
-		Render(strings.Join(parts, styleMuted.Render("  ·  ")))
+		Foreground(colMuted).
+		Render(strings.Join(parts, "  ·  "))
 }
 
 // ── Confirm overlay ───────────────────────────────────────────────────────────
