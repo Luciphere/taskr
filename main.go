@@ -1107,6 +1107,9 @@ func (m model) renderGantt(projectName string, availH int) string {
 	// Collect pending + completed/deleted tasks for this project
 	var tasks []Task
 	for _, t := range append(m.tasks, m.completedTasks...) {
+		if t.Status == "deleted" {
+			continue
+		}
 		name := t.Project
 		if name == "" {
 			name = "(no project)"
