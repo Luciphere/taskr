@@ -750,9 +750,20 @@ func (m model) renderMain() string {
 }
 
 func (m model) renderProjectsView() string {
+	bodyH := m.height - 5 // header(3) + footer(2)
+	tableMaxH := (bodyH * 2) / 5
+	ganttH := bodyH - tableMaxH
+
+	projects := m.projectSummaries()
+	projectName := ""
+	if m.projectCursor < len(projects) {
+		projectName = projects[m.projectCursor].name
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.renderHeader(),
-		m.renderProjects(),
+		m.renderProjects(tableMaxH),
+		m.renderGantt(projectName, ganttH),
 		m.renderFooter(),
 	)
 }
@@ -1028,7 +1039,7 @@ func (m model) renderDetailPane() string {
 
 // ── Projects view ─────────────────────────────────────────────────────────────
 
-func (m model) renderProjects() string {
+func (m model) renderProjects(maxH int) string {
 	projects := m.projectSummaries()
 
 	nameW  := max(20, m.width-42)
@@ -1054,8 +1065,7 @@ func (m model) renderProjects() string {
 		return lipgloss.JoinVertical(lipgloss.Left, headerRow, sep, empty)
 	}
 
-	availH := m.height - 3 - 2 // header + footer
-	tableH := max(1, availH-2)
+	tableH := max(1, maxH-2)
 	start := 0
 	if m.projectCursor >= tableH {
 		start = m.projectCursor - tableH + 1
@@ -1083,6 +1093,145 @@ func (m model) renderProjects() string {
 		}
 	}
 	return strings.Join(rows, "\n")
+}
+
+// ── Gantt chart ───────────────────────────────────────────────────────────────
+
+func (m model) renderGantt(projectName string, availH int) string {
+	if availH < 4 {
+		return ""
+	}
+
+	// Collect tasks for this project
+	var tasks []Task
+	for _, t := range m.tasks {
+		name := t.Project
+		if name == "" {
+			name = "(no project)"
+		}
+		if name == projectName {
+			tasks = append(tasks, t)
+		}
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		ei, _ := parseTaskDate(tasks[i].Entry)
+		ej, _ := parseTaskDate(tasks[j].Entry)
+		return ei.Before(ej)
+	})
+
+	// Time window
+	today := time.Now().Truncate(24 * time.Hour)
+	nameColW := 22
+	timelineW := max(10, m.width-nameColW-2)
+	lookback := timelineW / 4
+	winStart := today.AddDate(0, 0, -lookback)
+	winEnd := today.AddDate(0, 0, timelineW-lookback-1)
+	todayCol := lookback
+	_ = winEnd
+
+	// Section header
+	title := styleColHeader.Render("Gantt  ") + styleMuted.Render(projectName)
+	divider := styleMuted.Render(strings.Repeat("─", m.width))
+
+	// Axis row 1: today marker (▼)
+	axisTopStr := strings.Repeat(" ", nameColW)
+	for i := 0; i < timelineW; i++ {
+		if i == todayCol {
+			axisTopStr += styleActive.Render("▼")
+		} else {
+			axisTopStr += " "
+		}
+	}
+
+	// Axis row 2: weekly "Jan 02" labels
+	axisRune := make([]rune, timelineW)
+	for i := range axisRune {
+		axisRune[i] = ' '
+	}
+	cur := winStart
+	for cur.Weekday() != time.Monday {
+		cur = cur.AddDate(0, 0, 1)
+	}
+	for !cur.After(today.AddDate(0, 0, timelineW-lookback-1)) {
+		col := int(cur.Sub(winStart).Hours() / 24)
+		label := []rune(cur.Format("Jan 02"))
+		if col >= 0 && col+6 <= timelineW {
+			copy(axisRune[col:], label)
+		}
+		cur = cur.AddDate(0, 0, 7)
+	}
+	axisBottomStr := strings.Repeat(" ", nameColW) + string(axisRune)
+
+	lines := []string{title, divider, axisTopStr, axisBottomStr}
+	taskRows := availH - 4
+	overflow := 0
+
+	for i, t := range tasks {
+		if i >= taskRows {
+			overflow = len(tasks) - taskRows
+			break
+		}
+
+		entryDate, _ := parseTaskDate(t.Entry)
+		var barStart, barEnd time.Time
+
+		if t.Scheduled != "" {
+			barStart, _ = parseTaskDate(t.Scheduled)
+		} else {
+			barStart = entryDate
+		}
+
+		hasDue := t.Due != ""
+		if hasDue {
+			barEnd, _ = parseTaskDate(t.Due)
+		} else if t.IsActive() {
+			barEnd = today
+		} else {
+			barEnd = barStart
+		}
+
+		startCol := int(barStart.Sub(winStart).Hours() / 24)
+		endCol := int(barEnd.Sub(winStart).Hours() / 24)
+		startCol = max(0, min(startCol, timelineW-1))
+		endCol = max(0, min(endCol, timelineW-1))
+		if startCol > endCol {
+			startCol = endCol
+		}
+
+		var barChar string
+		var barStyle lipgloss.Style
+		if t.IsActive() {
+			barChar = "█"
+			barStyle = styleActive
+		} else if hasDue {
+			dueTime, _ := parseTaskDate(t.Due)
+			barChar = "─"
+			if dueTime.Before(today) {
+				barStyle = styleOverdue
+			} else if dueTime.Before(today.Add(3 * 24 * time.Hour)) {
+				barStyle = styleDueSoon
+			} else {
+				barStyle = styleDueOk
+			}
+		} else {
+			barChar = "◆"
+			barStyle = styleMuted
+		}
+
+		length := max(1, endCol-startCol+1)
+		barStr := barStyle.Render(strings.Repeat(barChar, length))
+		row := styleFg.Width(nameColW).Render(truncate(t.Description, nameColW-1)) +
+			strings.Repeat(" ", startCol) + barStr
+		lines = append(lines, row)
+	}
+
+	if overflow > 0 {
+		lines = append(lines, styleMuted.Render(fmt.Sprintf("  … %d more tasks", overflow)))
+	}
+	for len(lines) < availH {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ── History view ──────────────────────────────────────────────────────────────
