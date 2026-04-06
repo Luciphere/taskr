@@ -735,18 +735,23 @@ func (m model) View() string {
 }
 
 func (m model) renderMain() string {
-	// header=3, searchBar=1 (when active), detailPane=detailPaneH, footer=2
+	header := m.renderHeader()
+	detail := m.renderDetailPane()
+	footer := m.renderFooter()
 	searchBarH := 0
+	var searchBar string
 	if m.searching {
-		searchBarH = 1
+		searchBar = m.renderSearchBar()
+		searchBarH = lipgloss.Height(searchBar)
 	}
-	tableAvailH := m.height - 3 - searchBarH - detailPaneH - 2
-	parts := []string{m.renderHeader()}
+	tableAvailH := m.height - lipgloss.Height(header) - searchBarH - lipgloss.Height(detail) - lipgloss.Height(footer)
+	table := m.renderTable(max(1, tableAvailH))
+	parts := []string{header}
 	if m.searching {
-		parts = append(parts, m.renderSearchBar())
+		parts = append(parts, searchBar)
 	}
-	parts = append(parts, m.renderTable(tableAvailH), m.renderDetailPane(), m.renderFooter())
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	parts = append(parts, table, detail, footer)
+	return strings.Join(parts, "\n")
 }
 
 func (m model) renderProjectsView() string {
@@ -775,12 +780,23 @@ func (m model) renderProjectsView() string {
 const historyDetailH = 9
 
 func (m model) renderHistoryView() string {
-	parts := []string{m.renderHeader()}
+	header := m.renderHeader()
+	detail := m.renderHistoryDetail()
+	footer := m.renderFooter()
+	searchBarH := 0
+	var searchBar string
 	if m.historySearching {
-		parts = append(parts, m.renderHistorySearchBar())
+		searchBar = m.renderHistorySearchBar()
+		searchBarH = lipgloss.Height(searchBar)
 	}
-	parts = append(parts, m.renderHistory(), m.renderHistoryDetail(), m.renderFooter())
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	availH := m.height - lipgloss.Height(header) - searchBarH - lipgloss.Height(detail) - lipgloss.Height(footer)
+	history := m.renderHistory(max(1, availH))
+	parts := []string{header}
+	if m.historySearching {
+		parts = append(parts, searchBar)
+	}
+	parts = append(parts, history, detail, footer)
+	return strings.Join(parts, "\n")
 }
 
 func (m model) renderHistorySearchBar() string {
@@ -1436,7 +1452,7 @@ func (m model) renderGantt(projectName string, availH int) string {
 
 // ── History view ──────────────────────────────────────────────────────────────
 
-func (m model) renderHistory() string {
+func (m model) renderHistory(availH int) string {
 	statusW := 12
 	projW   := 14
 	endW    := 12
@@ -1467,11 +1483,6 @@ func (m model) renderHistory() string {
 		return lipgloss.JoinVertical(lipgloss.Left, headerRow, sep, empty)
 	}
 
-	searchBarH := 0
-	if m.historySearching {
-		searchBarH = 1
-	}
-	availH := m.height - 3 - searchBarH - historyDetailH - 2
 	tableH := max(1, availH-2)
 	start := 0
 	if m.historyCursor >= tableH {
