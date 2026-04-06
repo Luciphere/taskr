@@ -735,12 +735,12 @@ func (m model) View() string {
 }
 
 func (m model) renderMain() string {
-	// header=3, searchBar=1 (when active), detailPane=detailPaneH, footer=2
+	// header=3, searchBar=1 (when active), detailPane=detailPaneH, footer=1
 	searchBarH := 0
 	if m.searching {
 		searchBarH = 1
 	}
-	tableAvailH := m.height - 3 - searchBarH - detailPaneH - 2
+	tableAvailH := m.height - 3 - searchBarH - detailPaneH - 1
 	parts := []string{m.renderHeader()}
 	if m.searching {
 		parts = append(parts, m.renderSearchBar())
@@ -1091,6 +1091,10 @@ func (m model) renderProjects(maxH int) string {
 		} else {
 			rows = append(rows, lipgloss.NewStyle().Padding(0, 1).Render(row))
 		}
+	}
+	// Pad to exactly maxH lines so the layout below stays anchored
+	for len(rows) < maxH {
+		rows = append(rows, "")
 	}
 	return strings.Join(rows, "\n")
 }
