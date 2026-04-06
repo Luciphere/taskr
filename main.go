@@ -1169,8 +1169,10 @@ func (m model) renderGantt(projectName string, availH int) string {
 		pos = seg.col + len([]rune(seg.text))
 	}
 
-	lines := []string{title, divider, axisStr}
-	taskRows := availH - 3
+	colHeaders := styleColHeader.Width(statusColW).Render("Status") +
+		styleColHeader.Width(nameColW).Render("Task")
+	lines := []string{title, divider, colHeaders, axisStr}
+	taskRows := availH - 4
 	overflow := 0
 
 	// Cell types for timeline rendering
