@@ -17,7 +17,7 @@ belongs in the commit message, where it is kept next to the code it explains.
 
 - Windows: the console is switched to UTF-8, so æøå and the box borders stop arriving as mojibake.
 - Git Bash and MSYS2 are asked for UTF-8 too, so no ~/.bashrc edit is needed to read the app.
-- The overdue badge and the focus chip drop the symbols terminals draw two cells wide.
+- The focus chip drops the symbol terminals draw two cells wide.
 - The detail pane can sit right, left, or at the bottom (Settings → Detail pane).
 - The `/` search filter survives a restart, and esc still clears it.
 - An undated task marks the timeline where it happened: a diamond if high priority, else a dot.
@@ -27,6 +27,10 @@ belongs in the commit message, where it is kept next to the code it explains.
 - Settings groups Preferences into sections led by Theme and Language, and marks editable rows.
 - The Settings server row reads Off when this machine is not a sync hub, instead of needs token.
 - Listen and Server token are hidden while the server is off; switching it on asks for the token.
+
+### Removed
+
+- The Tasks tab no longer carries an overdue count; two numbers on one tab read as a shortcut.
 
 ## [1.35.0] - 2026-08-23
 

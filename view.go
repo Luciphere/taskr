@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -2146,18 +2145,11 @@ func (m model) renderTabs(avail int) string {
 	// word to buy two cells costs more than the cells are worth.
 	abbr := [numTabs]string{tr("1 Tasks"), tr("2 Cal"), tr("3 Proj"), tr("4 Tags"), tr("5 Board"), tr("6 Stats"), tr("7 Setup")}
 
-	// Overdue work is the one fact worth carrying in the bar itself: it is the
-	// reason to go to the Tasks tab, and from any other tab there was nothing
-	// on screen that said so. The badge rides on the label rather than being
-	// drawn separately, so the width fitting below counts it and the bar cannot
-	// overflow the header on its account. It is deliberately not on the bare-
-	// numbers level — at that width the bar is already down to what it takes to
-	// say where you are.
-	if n := len(m.cache.overdueSet); n > 0 {
-		badge := " !" + strconv.Itoa(n)
-		full[tabTasks] += badge
-		abbr[tabTasks] += badge
-	}
+	// No overdue badge here. A count pinned to the Tasks label ("1 Tasks !3")
+	// puts two numbers on one tab, and the leading one is the key you press —
+	// so the second read as a shortcut, not a warning. Overdue work is stated
+	// where it can be acted on: the red Due cells in the list, the Tasks-tab
+	// counter, and Stats.
 
 	// The selected tab always shows its full label so it is never truncated
 	// away. Unselected tabs degrade uniformly (full → abbr → nums) to fit
